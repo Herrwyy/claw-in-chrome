@@ -5,7 +5,8 @@ name: Release Extension
     branches:
       - main
     paths:
-      - "claw in chrome/manifest.json"
+      - manifest.json
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -31,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          VERSION="$(node -p "require('./claw in chrome/manifest.json').version")"
+          VERSION="$(node -p "require('./manifest.json').version")"
           if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Manifest version must use four numeric segments, got: ${VERSION}" >&2
             exit 1
@@ -40,8 +41,8 @@ jobs:
           BEFORE_SHA="${{ github.event.before }}"
           PREVIOUS_VERSION=""
           if [[ -n "${BEFORE_SHA}" ]] && [[ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
-            if git cat-file -e "${BEFORE_SHA}:claw in chrome/manifest.json" 2>/dev/null; then
-              PREVIOUS_VERSION="$(git show "${BEFORE_SHA}:claw in chrome/manifest.json" | node -e "let data=''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => { const parsed = JSON.parse(data); process.stdout.write(String(parsed.version || '')); });")"
+            if git cat-file -e "${BEFORE_SHA}:manifest.json" 2>/dev/null; then
+              PREVIOUS_VERSION="$(git show "${BEFORE_SHA}:manifest.json" | node -e "let data=''; process.stdin.on('data', chunk => data += chunk); process.stdin.on('end', () => { const parsed = JSON.parse(data); process.stdout.write(String(parsed.version || '')); });")"
             fi
           fi
 
@@ -52,11 +53,6 @@ jobs:
           fi
 
           TAG="v${VERSION}"
-          if git rev-parse "${TAG}" >/dev/null 2>&1; then
-            echo "Tag ${TAG} already exists. Refusing to publish duplicate release." >&2
-            exit 1
-          fi
-
           if [[ -n "${BEFORE_SHA}" ]] && [[ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
             NOTES="$(git log --format='- %s' "${BEFORE_SHA}..HEAD")"
           else
@@ -98,33 +94,71 @@ jobs:
           echo "notes_path=${NOTES_PATH}" >> "${GITHUB_OUTPUT}"
           echo "latest_json_path=${LATEST_JSON_PATH}" >> "${GITHUB_OUTPUT}"
 
-      - name: Create release tag
-        if: steps.meta.outputs.should_release == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.meta.outputs.tag }}" -m "Release ${{ steps.meta.outputs.tag }}"
-          git push origin "${{ steps.meta.outputs.tag }}"
-
       - name: Create release archive
         if: steps.meta.outputs.should_release == 'true'
         shell: bash
         run: |
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}"
-          zip -r "${{ steps.meta.outputs.zip_path }}" "claw in chrome"
+
+          PACKAGE_ITEMS=(
+            assets
+            i18n
+            sounds
+            blocked.html
+            claude_icon.svg
+            custom-provider-models.js
+            custom-provider-settings.js
+            gif.js
+            gif.worker.js
+            gif_viewer.html
+            gif_viewer.js
+            github-update-options.js
+            github-update-shared.js
+            github-update-sidepanel.js
+            github-update-worker.js
+            icon-128.png
+            managed_schema.json
+            manifest.json
+            offscreen.html
+            offscreen.js
+            options-debug-logger.js
+            options.html
+            pairing.html
+            provider-format-adapter.js
+            service-worker-loader.js
+            sidepanel-debug-logger.js
+            sidepanel-inline-provider.css
+            sidepanel-inline-provider.js
+            sidepanel.html
+            theme-init.js
+          )
+
+          MISSING_ITEMS=()
+          for item in "${PACKAGE_ITEMS[@]}"; do
+            if [[ ! -e "${item}" ]]; then
+              MISSING_ITEMS+=("${item}")
+            fi
+          done
+
+          if [[ ${#MISSING_ITEMS[@]} -gt 0 ]]; then
+            printf 'Missing package item: %s\n' "${MISSING_ITEMS[@]}" >&2
+            exit 1
+          fi
+
+          zip -r "${{ steps.meta.outputs.zip_path }}" "${PACKAGE_ITEMS[@]}"
 
       - name: Publish GitHub Release
         if: steps.meta.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: Claw in Chrome v${{ steps.meta.outputs.version }}
           body_path: ${{ steps.meta.outputs.notes_path }}
           files: |
             ${{ steps.meta.outputs.zip_path }}
             ${{ steps.meta.outputs.latest_json_path }}
+          fail_on_unmatched_files: true
           make_latest: true
           overwrite_files: true

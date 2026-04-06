@@ -85758,6 +85758,41 @@ function UX({
   }
 }
 const ZX = new class {
+  estimateTokenCountFromValue(e) {
+    const t = 1600;
+    if (e == null) {
+      return 0;
+    }
+    if (typeof e == "string") {
+      return Math.ceil(e.length / 4);
+    }
+    if (Array.isArray(e)) {
+      return Math.ceil(e.reduce((n, s) => {
+        if (s && typeof s == "object" && "type" in s && s.type === "image") {
+          return n + t;
+        }
+        if (typeof s == "string") {
+          return n + s.length / 4;
+        }
+        try {
+          return n + JSON.stringify(s).length / 4;
+        } catch (r) {
+          return n + String(s).length / 4;
+        }
+      }, 0));
+    }
+    try {
+      return Math.ceil(JSON.stringify(e).length / 4);
+    } catch (n) {
+      return Math.ceil(String(e).length / 4);
+    }
+  }
+  estimateTokenCountFromMessage(e) {
+    if (!e || !("role" in e)) {
+      return 0;
+    }
+    return this.estimateTokenCountFromValue(e.content);
+  }
   calculateMetricsFromMessages(e, t, n = 200000) {
     for (let r = e.length - 1; r >= 0; r--) {
       const s = e[r];
@@ -85787,6 +85822,57 @@ const ZX = new class {
       percentRemaining: Math.max(0, 100 - d),
       isWarning: c >= u - 20000,
       isError: c >= u - 10000
+    };
+  }
+  calculateProjectedMetricsFromMessages(e, t, n = 200000) {
+    let r = -1;
+    let s = null;
+    for (let i = e.length - 1; i >= 0; i--) {
+      const o = e[i];
+      if (o && "role" in o && o.role === "assistant" && "usage" in o && o.usage) {
+        r = i;
+        s = o.usage;
+        break;
+      }
+    }
+    if (!s) {
+      const s = this.estimateTokenCountFromValue(e);
+      const r = Math.max(1, n - t);
+      const i = Math.round(s / r * 100);
+      return {
+        inputTokens: s,
+        outputTokens: 0,
+        totalTokens: s,
+        cacheTokens: 0,
+        contextWindow: r,
+        percentUsed: i,
+        percentRemaining: Math.max(0, 100 - i),
+        isWarning: s >= r - 20000,
+        isError: s >= r - 10000
+      };
+    }
+    const i = this.calculateMetricsFromUsage(s, t, n);
+    let o = 0;
+    for (let a = r + 1; a < e.length; a++) {
+      o += this.estimateTokenCountFromMessage(e[a]);
+    }
+    if (!(o > 0)) {
+      return i;
+    }
+    const a = Math.round(i.inputTokens + o);
+    const l = Math.round(a + i.outputTokens);
+    const c = Math.max(1, n - t);
+    const u = Math.round(l / c * 100);
+    return {
+      inputTokens: a,
+      outputTokens: i.outputTokens,
+      totalTokens: l,
+      cacheTokens: i.cacheTokens,
+      contextWindow: c,
+      percentUsed: u,
+      percentRemaining: Math.max(0, 100 - u),
+      isWarning: l >= c - 20000,
+      isError: l >= c - 10000
     };
   }
   getColorForPercentage(e) {
@@ -88311,13 +88397,14 @@ function CQ({
       const __cpMetricsProviderConfig = await __cpReadCurrentProviderConfig();
       __cpContextWindow = __cpNormalizeContextWindow(__cpMetricsProviderConfig?.contextWindow);
     } catch {}
-    const d = ZX.calculateMetricsFromMessages(b, wQ, __cpContextWindow);
+    const d = ZX.calculateProjectedMetricsFromMessages(b, wQ, __cpContextWindow);
     if (d) {
       if (!(d.percentRemaining < 20) || !(d.percentRemaining >= 10)) {
         d.percentRemaining;
       }
     }
     let g = b;
+    let __cpPendingUserMessage = null;
     const y = await nQ({
       message: e,
       messages: b,
@@ -88339,8 +88426,7 @@ function CQ({
         break;
       }
     }
-    const T = !v && C && C.isError;
-    if (v || T) {
+    if (v) {
       const e = v ? "manual" : "auto";
       P(true);
       z(null);
@@ -88449,6 +88535,44 @@ function CQ({
           type: "text",
           text: Ht()
         });
+      }
+      __cpPendingUserMessage = n;
+    }
+    const __cpProjectedMetrics = ZX.calculateProjectedMetricsFromMessages(L, wQ, __cpContextWindow);
+    if (!v && __cpProjectedMetrics && __cpProjectedMetrics.isError) {
+      P(true);
+      z(null);
+      te.current = new AbortController();
+      try {
+        if (!ee.current) {
+          throw new Error("Client not initialized");
+        }
+        const e = new WX(e => we(e, l, "sampling_compaction"));
+        const t = await e.compactConversation(b, wQ, true, __cpContextWindow);
+        w(t.messagesAfterCompacting);
+        A(b);
+        B(t.tokensSaved);
+        ae.current = null;
+        le.current.clear();
+        g = t.messagesAfterCompacting;
+        L = __cpPendingUserMessage ? [...g, __cpPendingUserMessage] : [...g];
+        G?.track("claude_chrome.chat.auto_compact", {
+          preTokens: t.preCompactTokenCount,
+          postTokens: t.postCompactTokenCount,
+          savedTokens: t.tokensSaved,
+          sessionId: s,
+          permissions: x,
+          quick_mode: false
+        });
+      } catch (U) {
+        if (_Q(U) !== "Request was aborted." && (!(U instanceof Error) || U.name !== "AbortError") && !ne.current) {
+          z(U instanceof Error ? U.message : "Failed to auto-compact conversation");
+        }
+        P(false);
+        return;
+      } finally {
+        P(false);
+        te.current &&= null;
       }
     }
     w(L);

@@ -35,12 +35,16 @@ Open the extension options page first, then go to `Model provider` on the left.
 
 After creating a profile, mainly fill in these fields:
 
+
 - `Provider format`
 - `Base URL`
 - `API Key`
 - `Model`
 
-After that, click `Save and apply`, then close and reopen the side panel. Once that is done, you are ready to use it.
+After that, click `Save and apply`, then close and reopen the side panel. Once that is done, you are ready to use it. 
+## 3. Recommended Settings
+
+**It is  recommended to set the "Provider Format" to the `Anthropic` protocol.** Compared to other protocol formats, using the Anthropic protocol maximizes the tool's potential, resulting in better model performance and response quality in practical use.
 
 ![Provider settings](./docs/screenshots/05.png)
 
